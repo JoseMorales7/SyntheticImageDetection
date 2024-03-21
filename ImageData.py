@@ -2,7 +2,7 @@
 import torch
 from torch.utils.data import Dataset, DataLoader
 
-from skimage import io
+from PIL import Image
 
 import numpy as np
 import torch
@@ -43,7 +43,7 @@ class ImageData(Dataset):
         pathSplits = imagePath.split(self.dataParentFolder)[1].split("/")
         dataset = pathSplits[0]
         dataset =self.image_to_vector(dataset)
-        image = io.imread(imagePath)
+        image = Image.open(imagePath)
         if self.transform:
             image = self.transform(image)
     
