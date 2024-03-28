@@ -19,18 +19,29 @@ class ImageData(Dataset):
     test_generators = ['ddpm', 'gau_gan', 'pallet', 'cips']
     real_data = ['afhq', 'celebahq', 'coco', 'imagenet', 'landscape', 'lsun', 'metfaces', '']
 
-    def __init__(self, dataParentFolder: str, dataIdxs: list, transform = None, batch_size=128):
+    def __init__(self, dataParentFolder: str, dataIdxs: list = None, transform = None, batch_size=128):
         self.dataParentFolder = dataParentFolder
         self.transform = transform
 
         imagePaths = []
+        imageDataset = []
+        fake = []
         for dataset in os.listdir(dataParentFolder):
             path = os.path.join(dataParentFolder, dataset)
             df = pd.read_csv(os.path.join(path, 'metadata.csv'))
             imageFiles = df['image_path'].tolist()
             imagePaths.extend([os.path.join(path, imageFile).replace("\\", "/") for imageFile in imageFiles])
-            
-        self.imagePaths = np.array(imagePaths)[dataIdxs]
+            imageDataset.extend([dataset] * len(imageFiles))
+            fake.extend(df["target"])
+
+        self.imagePaths = np.array(imagePaths)
+        self.imageDataset = np.array(imageDataset)
+        self.fake = np.array(fake)
+
+        if dataIdxs:
+            self.imagePaths = self.imagePaths[dataIdxs]
+            self.imageDataset = self.imageDataset[dataIdxs]
+            self.fake = self.fake[dataIdxs]
 
     def __len__(self):
         return len(self.imagePaths)
@@ -40,40 +51,49 @@ class ImageData(Dataset):
             idx = idx.tolist()
 
         imagePath = self.imagePaths[idx]
-        pathSplits = imagePath.split(self.dataParentFolder)[1].split("/")
-        dataset = pathSplits[0]
-        dataset =self.image_to_vector(dataset)
         image = Image.open(imagePath)
         if self.transform:
             image = self.transform(image)
-    
-        return image, dataset
+
+        label = 0
+        dataset = self.imageDataset[idx]
+        if self.fake[idx] > 0:
+            label = self.image_to_vector(dataset)
+
+        return image, label
     
     # TODO: 
     def image_to_vector(self, dataset):
-        output = np.zeros(10)
-        # for i in range(len(city)):
-        #     if city == 'Atlanta':
-        #         output[0] = 1
-        #     elif city == 'Austin':
-        #         output[1] = 1
-        #     elif city == 'Boston':
-        #         output[2] = 1
-        #     elif city == 'Chicago':
-        #         output[3] = 1
-        #     elif city == 'LosAngeles':
-        #         output[4] = 1
-        #     elif city == 'Miami':
-        #         output[5] = 1
-        #     elif city == 'NewYork':
-        #         output[6] = 1
-        #     elif city == 'Phoenix':
-        #         output[7] = 1
-        #     elif city == 'SanFrancisco':
-        #         output[8] = 1
-        #     elif city == 'Seattle':
-        #         output[9] = 1
-        return torch.tensor(output)
+        labels = {
+            'big_gan': 1,
+            'cips' : 1,
+            'cycle_gan' : 1,
+            'ddpm' : 2,
+            'denoising_diffusion_gan' : 2,
+            'diffusion_gan' : 2,
+            'face_synthetics' : 3,
+            'gansformer' : 1,
+            'gau_gan' : 1,
+            'generative_inpainting' : 1,
+            'glide' : 2,
+            'lama' : 3,
+            'latent_diffusion' : 2,
+            'mat' : 3,
+            'palette' : 2,
+            'projected_gan' : 1,
+            'pro_gan' : 1,
+            'sfhq' : 2,
+            'stable_diffusion' : 2,
+            'star_gan' : 1,
+            'stylegan1' : 1,
+            'stylegan2' : 1,
+            'stylegan3' : 1,
+            'taming_transformer' : 3,
+            'vq_diffusion' : 2
+        }
+
+        return torch.tensor(labels.get(dataset))
+
 
 
 # %%
