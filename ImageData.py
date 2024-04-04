@@ -60,10 +60,10 @@ class ImageData(Dataset):
         if self.fake[idx] > 0:
             label = self.image_to_vector(dataset)
 
-        return image, label
+        return image, torch.tensor(label)
     
-    # TODO: 
     def image_to_vector(self, dataset):
+        #1 is gan, 2 is diffusion, 3 is other
         labels = {
             'big_gan': 1,
             'cips' : 1,
@@ -92,12 +92,12 @@ class ImageData(Dataset):
             'vq_diffusion' : 2
         }
 
-        return torch.tensor(labels.get(dataset))
+        return labels.get(dataset)
 
 
 
 # %%
-def getImagesDataLoader(dataParentFolder: str, batchSize: int = 128, transforms = None):
+def getImagesDataloaders(dataParentFolder: str, batchSize: int = 128, transforms = None):
     datasetIdxs = [0]
     totalPoints = 0
     test_generators = ['ddpm', 'gau_gan', 'pallet', 'cips']
