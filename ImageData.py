@@ -12,12 +12,14 @@ import random
 import time
 import pandas as pd
 
+from sklearn.model_selection import train_test_split
+
 
 
 # %%
 class ImageData(Dataset):
-    test_generators = ['ddpm', 'gau_gan', 'pallet', 'cips']
-    real_data = ['afhq', 'celebahq', 'coco', 'imagenet', 'landscape', 'lsun', 'metfaces', '']
+    # test_generators = ['ddpm', 'gau_gan', 'pallet', 'cips']
+    # real_data = ['afhq', 'celebahq', 'coco', 'imagenet', 'landscape', 'lsun', 'metfaces', '']
 
     def __init__(self, dataParentFolder: str, dataIdxs: list = None, transform = None, batch_size=128):
         self.dataParentFolder = dataParentFolder
@@ -26,7 +28,7 @@ class ImageData(Dataset):
         imagePaths = []
         imageDataset = []
         fake = []
-        for dataset in os.listdir(dataParentFolder):
+        for dataset in sorted(os.listdir(dataParentFolder)):
             path = os.path.join(dataParentFolder, dataset)
             df = pd.read_csv(os.path.join(path, 'metadata.csv'))
             imageFiles = df['image_path'].tolist()
@@ -100,9 +102,9 @@ class ImageData(Dataset):
 def getImagesDataloaders(dataParentFolder: str, batchSize: int = 128, transforms = None):
     datasetIdxs = [0]
     totalPoints = 0
-    test_generators = ['ddpm', 'gau_gan', 'pallet', 'cips']
-    testGeneratorIdxs = [0]
-    for dataset in os.listdir(dataParentFolder):
+    test_generators = ['ddpm', 'gau_gan', 'palette', 'cips']
+    testGeneratorIdxs = []
+    for dataset in sorted(os.listdir(dataParentFolder)):
         if dataset in test_generators:
             testGeneratorIdxs.append(totalPoints)
         df = pd.read_csv(os.path.join(dataParentFolder, dataset, 'metadata.csv'))
@@ -112,36 +114,33 @@ def getImagesDataloaders(dataParentFolder: str, batchSize: int = 128, transforms
     trainIdxs = []
     validIdxs = []
     testIdxs = []
+    unseenModelsIdxs = []
     for i in range(len(datasetIdxs) - 1):
         start = datasetIdxs[i]
         stop = datasetIdxs[i + 1]
         idxs = np.arange(start, stop)
-
         if start in testGeneratorIdxs:
             testIdxs.extend(idxs)
+            unseenModelsIdxs.extend(idxs)
         else:
-            num_train = int(np.round((stop - start) / 100 * 80))
-            num_valid = int(round(num_train * 0.05))
-
-            num_train -= num_valid
-            num_valid += num_train
-
-            # Shuffle all training stimulus image
-            np.random.shuffle(idxs)
-
             # Assign 80% of the shuffled stimulus images for each city to the training partition,
             # and 20% to the test partition
-            trainIdxs.extend(idxs[:num_train])
-            validIdxs.extend(idxs[num_train:num_valid])
-            testIdxs.extend(idxs[num_valid:])
+            trIdxs, tIdxs = train_test_split(idxs, train_size=0.8, random_state=42)
+            trIdxs, vIdxs = train_test_split(trIdxs, train_size=0.95, random_state=42)
+            
+            trainIdxs.extend(trIdxs)
+            validIdxs.extend(vIdxs)
+            testIdxs.extend(tIdxs)
 
     trainData = ImageData(dataParentFolder, trainIdxs, transform=transforms)
     validData = ImageData(dataParentFolder, validIdxs, transform=transforms)
     testData = ImageData(dataParentFolder, testIdxs, transform=transforms)
+    unseenData = ImageData(dataParentFolder, unseenModelsIdxs, transform=transforms)
 
     trainDataLoader = DataLoader(trainData, batch_size=batchSize, shuffle=True)
     validDataLoader = DataLoader(validData, batch_size=batchSize, shuffle=True)
     testDataLoader = DataLoader(testData, batch_size=batchSize, shuffle=True)
+    unseenDataLoader = DataLoader(unseenData, batch_size=batchSize, shuffle=True)
 
-    return trainDataLoader, validDataLoader, testDataLoader
+    return trainDataLoader, validDataLoader, testDataLoader, unseenDataLoader
     
