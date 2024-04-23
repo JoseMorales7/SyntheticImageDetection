@@ -21,9 +21,10 @@ class ImageData(Dataset):
     # test_generators = ['ddpm', 'gau_gan', 'pallet', 'cips']
     # real_data = ['afhq', 'celebahq', 'coco', 'imagenet', 'landscape', 'lsun', 'metfaces', '']
 
-    def __init__(self, dataParentFolder: str, dataIdxs: list = None, transform = None, batch_size=128):
+    def __init__(self, dataParentFolder: str, dataIdxs: list = None, transform = None, batch_size=128, onehot = False):
         self.dataParentFolder = dataParentFolder
         self.transform = transform
+        self.onehot = onehot
 
         imagePaths = []
         imageDataset = []
@@ -57,12 +58,17 @@ class ImageData(Dataset):
         if self.transform:
             image = self.transform(image)
 
-        label = 0
-        dataset = self.imageDataset[idx]
-        if self.fake[idx] > 0:
-            label = self.image_to_vector(dataset)
+        if self.onehot:
+            dataset = self.imageDataset[idx]
+            label = self.image_to_vector2(dataset)
+        else :
+            label = 0
+            dataset = self.imageDataset[idx]
+            if self.fake[idx] > 0:
+                label = self.image_to_vector(dataset)
+            label = torch.tensor(label)
 
-        return image, torch.tensor(label)
+        return image, label
     
     def image_to_vector(self, dataset):
         #1 is gan, 2 is diffusion, 3 is other
@@ -95,11 +101,29 @@ class ImageData(Dataset):
         }
 
         return labels.get(dataset)
+    
+    def image_to_vector2(self, data):
+        gans = ['big_gan', "cips",  "cycle_gan", 'gansformer', 'gau_gan', 'generative_inpainting', 'projected_gan', 'pro_gan', 
+                'star_gan', 'stylegan1', 'stylegan2', 'stylegan3']
+        diffusion = ['ddpm', 'denoising_diffusion_gan', 'diffusion_gan', 'glide', 'latent_diffusion','palette', 'sfhq', 'stable_diffusion','vq_diffusion' ]
+        other = ['face_synthetics', 'lama', 'mat', 'taming_transformer']
+
+        output = np.zeros(4)
+        for i in range(4):
+            if data in gans :
+                output[1] = 1
+            elif data in diffusion:
+                output[2] = 1
+            elif data in other:
+                output[3] = 1
+            else:
+                output[0] = 1
+        return torch.tensor(output)
 
 
 
 # %%
-def getImagesDataloaders(dataParentFolder: str, batchSize: int = 128, transforms = None):
+def getImagesDataloaders(dataParentFolder: str, batchSize: int = 128, transforms = None, onehot = False):
     datasetIdxs = [0]
     totalPoints = 0
     test_generators = ['ddpm', 'gau_gan', 'palette', 'cips']
@@ -132,10 +156,10 @@ def getImagesDataloaders(dataParentFolder: str, batchSize: int = 128, transforms
             validIdxs.extend(vIdxs)
             testIdxs.extend(tIdxs)
 
-    trainData = ImageData(dataParentFolder, trainIdxs, transform=transforms)
-    validData = ImageData(dataParentFolder, validIdxs, transform=transforms)
-    testData = ImageData(dataParentFolder, testIdxs, transform=transforms)
-    unseenData = ImageData(dataParentFolder, unseenModelsIdxs, transform=transforms)
+    trainData = ImageData(dataParentFolder, trainIdxs, transform=transforms, onehot = onehot)
+    validData = ImageData(dataParentFolder, validIdxs, transform=transforms, onehot = onehot)
+    testData = ImageData(dataParentFolder, testIdxs, transform=transforms, onehot = onehot)
+    unseenData = ImageData(dataParentFolder, unseenModelsIdxs, transform=transforms, onehot = onehot)
 
     trainDataLoader = DataLoader(trainData, batch_size=batchSize, shuffle=True)
     validDataLoader = DataLoader(validData, batch_size=batchSize, shuffle=True)
