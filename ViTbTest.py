@@ -1,62 +1,99 @@
 # %%
 import torchvision
-from torchvision.models import vgg19
 from torchvision.transforms import transforms
 from tqdm import tqdm
 import torch
 import ImageData
 import numpy as np
-import json
-device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 import time
+import json
+
+from torch.utils.data import Subset, DataLoader
+import numpy as np
+from sklearn.model_selection import train_test_split
 
 # %%
-model_name = "VGG"
+model_name = "ViT_b_16_10E"
 model_image_size = 224
 # vit = models.vit_l_16(models.ViT_L_16_Weights.IMAGENET1K_V1)
 
 # %%
-class VGG(torch.nn.Module):
-    def __init__(self, numClasses):
-        super(VGG, self).__init__()
-        vgg = vgg19(weights = "DEFAULT")
-        self.featureExtractor = vgg.features
-        self.avgpool = torch.nn.AdaptiveAvgPool2d((7, 7))
-        self.class1, _, _, self.class2, _, _, _  = list(vgg.classifier.children())
-        self.class3 = torch.nn.Linear(in_features = 4096, out_features = numClasses)
-        self.classifier = torch.nn.Sequential(
-            self.class1,
-            torch.nn.ReLU(inplace=True),
-            self.class2,
-            torch.nn.ReLU(inplace=True),
-            self.class3
-        )
+class ViT(torch.nn.Module):
+    def __init__(self, numClasses: int):
+        super(ViT, self).__init__()
+        
+        self.reference_vit = torchvision.models.vit_b_16(torchvision.models.ViT_B_16_Weights.IMAGENET1K_V1)
+        self.reference_vit.heads.head = torch.nn.Sequential(torch.nn.Linear(768, 512),
+                                                            torch.nn.ReLU(),
+                                                            torch.nn.Linear(512, 256),
+                                                            torch.nn.ReLU(),
+                                                            torch.nn.Linear(256, numClasses))
+        self.reference_vit.conv_proj.requires_grad = False
+        self.reference_vit.encoder.requires_grad = False
+        self.reference_vit.heads.requires_grad = False
+        self.reference_vit.heads.head.requires_grad = True
+
+        self.softmax = torch.nn.Softmax(dim = 1)
 
     def forward(self, x):
-        #do something 
-        x = self.featureExtractor(x)
-        x = self.avgpool(x)
-        x = torch.flatten(x, 1)
-        x = self.classifier(x)
+        # Reshape and permute the input tensor
+        x = self._process_input(x)
+        n = x.shape[0]
+
+        # Expand the class token to the full batch
+        batch_class_token = self.reference_vit.class_token.expand(n, -1, -1)
+        x = torch.cat([batch_class_token, x], dim=1)
+
+        x = self.reference_vit.encoder(x)
+
+        # Classifier "token" as used by standard language architectures
+        x = x[:, 0]
+        x =  self.reference_vit.heads(x)
+        
+        #extractedFeature = self.ViT(x)
+        softmax = self.softmax(x)
+
+        return softmax
+    
+    def _process_input(self, x: torch.Tensor) -> torch.Tensor:
+        n, c, h, w = x.shape
+        p = self.reference_vit.patch_size
+        torch._assert(h == self.reference_vit.image_size, f"Wrong image height! Expected {self.reference_vit.image_size} but got {h}!")
+        torch._assert(w == self.reference_vit.image_size, f"Wrong image width! Expected {self.reference_vit.image_size} but got {w}!")
+        n_h = h // p
+        n_w = w // p
+        
+        # (n, c, h, w) -> (n, hidden_dim, n_h, n_w)
+        x =  self.reference_vit.conv_proj(x)
+        # (n, hidden_dim, n_h, n_w) -> (n, hidden_dim, (n_h * n_w))
+        x = x.reshape(n, self.reference_vit.hidden_dim, n_h * n_w)
+
+        # (n, hidden_dim, (n_h * n_w)) -> (n, (n_h * n_w), hidden_dim)
+        # The self attention layer expects inputs in the format (N, S, E)
+        # where S is the source sequence length, N is the batch size, E is the
+        # embedding dimension
+        x = x.permute(0, 2, 1)
 
         return x
 
 # %%
-model = VGG(4).to(device)
+model = ViT(4).to(device)
 # print(*list(model.children())[:-1])
 
 # %%
 # Loss and optimizer
 criterion = torch.nn.CrossEntropyLoss()
-optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+optimizer = torch.optim.Adam(model.parameters(), lr=0.0001)
 
 # %%
-batch_size = 32
+batch_size = 64
 transform = transforms.Compose([transforms.ToTensor(), 
                                 transforms.RandomResizedCrop(size=(model_image_size, model_image_size), antialias=True), 
                                 transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
-trainDataLoader, validDataLoader, testDataLoader, unseenDataLoader = ImageData.getImagesDataloaders("../ArtiFact/", transforms = transform, batchSize=batch_size)
+trainDataLoader, validDataLoader, testDataLoader, unseenDataLoader = ImageData.getImagesDataloaders(r"../ArtiFact", transforms = transform, batchSize=batch_size)
 
+# %%
 
 def evaluate_on_data(model, dataloader, dirty: bool = False):
     criterion = torch.nn.CrossEntropyLoss()
@@ -95,7 +132,20 @@ def evaluate_on_data(model, dataloader, dirty: bool = False):
                     num_correct_dirty += 1
 
                 num_samples += 1
+                    
+                
+                
     return total_loss / len(dataloader), num_correct / num_samples, num_correct_dirty / num_samples
+
+
+# dataset = trainDataLoader.dataset
+# trainIdxs, _ = train_test_split(range(len(dataset.imagePaths)), train_size=500, random_state=42)
+# ValIdxs = trainIdxs[490:]
+# trainIdxs = trainIdxs[:490]
+# trainSub = Subset(dataset, trainIdxs)
+# valSub = Subset(dataset, ValIdxs)
+# trainSubDataloader = DataLoader(trainSub, batch_size=32, shuffle=True)
+# valSubDataloader = DataLoader(valSub, batch_size=32, shuffle=True)
 
 # %%
 num_epochs = 10
@@ -132,9 +182,6 @@ for epoch in range(num_epochs):
     valid_acc_array[epoch] = valid_acc
     valid_acc_dirty_array[epoch] = valid_acc_dirty
 
-#9:53:40
-#9:55:28
-
 
 # %%
 test_loss, test_acc, test_acc_dirty = evaluate_on_data(model, testDataLoader)
@@ -169,6 +216,4 @@ with open(f"./results/{model_name}_valid_dirty_acc.npy", 'wb') as f:
 with open(f"./results/{model_name}_train.npy", 'wb') as f:
     np.save(f, train_loss_array)
 
-torch.save(model.state_dict(), f"./savedModels/{model_name}Params.pth")
-
-
+torch.save(model.state_dict(), "./savedModels/" + model_name + "Params.pth")
