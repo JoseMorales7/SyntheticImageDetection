@@ -55,7 +55,7 @@ model = DenseNet(4).to(device)
 # %%
 # Loss and optimizer
 criterion = torch.nn.CrossEntropyLoss()
-optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+optimizer = torch.optim.Adam(model.parameters(), lr=0.0001)
 
 # %%
 batch_size = 32
